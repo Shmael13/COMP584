@@ -116,7 +116,7 @@ class CharacterDecoder(nn.Module):
         for step in range(max_len):
             logits = self.forward(predictive_emb, generated)  # [B, t, vocab]
             next_logits = logits[:, -1, :]                     # [B, vocab]
-            all_logits.append(next_logits.detach())            # Store raw logits for analysis
+            all_logits.append(next_logits)                      # Keep graph for entropy regularization
 
             scaled_logits = next_logits / temperature
 

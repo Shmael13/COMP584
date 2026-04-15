@@ -24,11 +24,8 @@ from ..config import SegmentationConfig
 
 
 def bytes_to_str(byte_list: list[int]) -> str:
-    """Convert a byte list to a printable string for display."""
-    try:
-        return bytes(b for b in byte_list if 32 <= b < 127).decode("ascii") or f"<{byte_list}>"
-    except Exception:
-        return str(byte_list)
+    """Convert a byte list to a printable string, escaping non-printable bytes as [hex]."""
+    return "".join(chr(b) if 32 <= b < 127 else f"[{b:02x}]" for b in byte_list)
 
 
 def collect_vocabulary(
@@ -90,7 +87,9 @@ def collect_vocabulary(
     
     # Attribute alignment: for each top word, which attribute value is most associated?
     top_words = freq.most_common(20)
-    word_attribute_alignment = {}
+    # Keyed by byte tuple to avoid collisions when different byte sequences
+    # share the same printable representation.
+    word_attribute_alignment_raw: dict[tuple, list] = {}
     for word, _ in top_words:
         objs = word_to_objects[word]
         if not objs:
@@ -102,14 +101,18 @@ def collect_vocabulary(
             most_common_val = Counter(vals).most_common(1)[0]
             purity = most_common_val[1] / len(vals)
             dominant_attrs.append((attr_idx, most_common_val[0], purity))
-        word_attribute_alignment[bytes_to_str(list(word))] = dominant_attrs
+        word_attribute_alignment_raw[word] = dominant_attrs
+
+    # Build display-friendly version: string key → alignment
+    # (used by print_vocabulary_report via the top_words list which also uses byte tuples)
+    word_attribute_alignment = {w: word_attribute_alignment_raw.get(w, []) for w, _ in top_words}
 
     return {
         "vocab_size": vocab_size,
         "total_tokens": total_tokens,
         "type_token_ratio": vocab_size / max(total_tokens, 1),
         "zipf_correlation": zipf_coeff,
-        "top_words": [(bytes_to_str(list(w)), c) for w, c in freq.most_common(20)],
+        "top_words": [(w, c) for w, c in freq.most_common(20)],
         "word_attribute_alignment": word_attribute_alignment,
         "frequency_distribution": dict(freq.most_common(50)),
     }
@@ -125,8 +128,9 @@ def print_vocabulary_report(vocab_results: dict):
     print(f"Type-token ratio   : {vocab_results['type_token_ratio']:.4f}")
     print(f"Zipf correlation   : {vocab_results['zipf_correlation']:.4f}  (higher = more Zipfian)")
     print(f"\nTop 20 emergent words:")
-    for word_str, count in vocab_results["top_words"]:
-        alignment = vocab_results["word_attribute_alignment"].get(word_str, [])
+    for word_key, count in vocab_results["top_words"]:
+        word_str = bytes_to_str(list(word_key)) if isinstance(word_key, tuple) else word_key
+        alignment = vocab_results["word_attribute_alignment"].get(word_key, [])
         align_str = ", ".join(f"attr{a}={v}({p:.0%})" for a, v, p in alignment)
         print(f"  {word_str!r:20s}  count={count:>5}  [{align_str}]")
     print(f"{'=' * 60}\n")

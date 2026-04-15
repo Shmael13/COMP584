@@ -298,7 +298,7 @@ def main():
     print(f"\n{'='*50}")
     print(f"FINAL RESULTS")
     print(f"{'='*50}")
-    print(f"  Best val accuracy : {history.val_acc[-1]:.3f}  (random = {1/(cfg.env.n_distractors+1):.3f})")
+    print(f"  Best val accuracy : {max(history.val_acc):.3f}  (random = {1/(cfg.env.n_distractors+1):.3f})")
     print(f"  Topsim            : {comp['topsim']:.4f}")
     print(f"  Unique messages   : {unique} / {len(pool)}")
     print(f"  Vocab size        : {vocab['vocab_size']}")

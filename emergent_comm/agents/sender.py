@@ -107,14 +107,17 @@ class Sender(nn.Module):
             result["logits"] = logits
         else:
             # Autoregressive inference path (fixed-length to prevent EOS collapse)
-            msg_bytes, log_probs, logits = self.decoder.generate(
+            msg_bytes, log_probs, logits, soft_tokens = self.decoder.generate(
                 pred_emb,
                 temperature=self.agent_cfg.temperature,
                 max_len=self.agent_cfg.max_message_len,
                 fixed_length=True,
+                use_straight_through=self.agent_cfg.use_straight_through,
             )
             result["message_bytes"] = msg_bytes
             result["log_probs"] = log_probs
             result["logits"] = logits
+            if soft_tokens is not None:
+                result["message_soft"] = soft_tokens
 
         return result

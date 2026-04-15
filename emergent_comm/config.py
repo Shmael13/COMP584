@@ -9,7 +9,7 @@ class EnvConfig:
     n_shapes: int = 8
     n_sizes: int = 4
     # How many distractor objects the receiver chooses between
-    n_distractors: int = 7  # + 1 target = 8 total candidates
+    n_distractors: int = 3  # + 1 target = 4 total candidates (random baseline = 0.25)
     # Random seed for reproducibility
     seed: int = 42
 
@@ -70,7 +70,7 @@ class AgentConfig:
     # Temperature for sender sampling during training
     temperature: float = 1.0
     # Whether to use straight-through estimator (True) or REINFORCE (False)
-    use_straight_through: bool = False
+    use_straight_through: bool = True
 
 
 @dataclass
@@ -82,7 +82,7 @@ class TrainingConfig:
     grad_clip: float = 1.0
     eval_every: int = 500
     # Entropy regularization coefficient (encourages diverse messages)
-    entropy_coeff: float = 0.05
+    entropy_coeff: float = 0.005
     # REINFORCE baseline decay
     baseline_decay: float = 0.95
     checkpoint_dir: str = "checkpoints"

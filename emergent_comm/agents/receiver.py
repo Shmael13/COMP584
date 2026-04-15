@@ -72,20 +72,24 @@ class Receiver(nn.Module):
         self,
         message_bytes: torch.Tensor,
         pad_mask: torch.Tensor | None = None,
+        soft_tokens: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Encode byte message into a single embedding vector.
 
         Args:
-            message_bytes: [B, msg_len]  — bytes with W_TOKEN prepended
-            pad_mask     : [B, msg_len]  — True where padded
+            message_bytes: [B, msg_len]              — bytes with W_TOKEN prepended
+            pad_mask     : [B, msg_len]              — True where padded
+            soft_tokens  : [B, msg_len, vocab_size]  — Gumbel one-hots (straight-through path)
         Returns:
             msg_emb: [B, d_backbone]
         """
-        # Encoder reads the message as a single "word"
-        word_emb = self.encoder(message_bytes, key_padding_mask=pad_mask)  # [B, d_bb]
-        # Backbone over a single word (trivial but keeps architecture consistent)
-        pred_emb = self.backbone(word_emb.unsqueeze(1))[:, 0, :]           # [B, d_bb]
+        if soft_tokens is not None:
+            # Straight-through: differentiable path via soft token embeddings
+            word_emb = self.encoder.forward_soft(soft_tokens)
+        else:
+            word_emb = self.encoder(message_bytes, key_padding_mask=pad_mask)
+        pred_emb = self.backbone(word_emb.unsqueeze(1))[:, 0, :]
         return pred_emb
 
     def forward(
@@ -93,19 +97,21 @@ class Receiver(nn.Module):
         message_bytes: torch.Tensor,
         candidate_attrs: torch.Tensor,
         pad_mask: torch.Tensor | None = None,
+        soft_tokens: torch.Tensor | None = None,
     ) -> dict:
         """
         Args:
-            message_bytes  : [B, msg_len]       — bytes (W_TOKEN prepended)
+            message_bytes  : [B, msg_len]              — bytes (W_TOKEN prepended)
             candidate_attrs: [B, n_cands, 3]
-            pad_mask       : [B, msg_len]        — True where padded
+            pad_mask       : [B, msg_len]              — True where padded
+            soft_tokens    : [B, msg_len, vocab_size]  — Gumbel one-hots (straight-through)
         Returns dict with:
             logits         : [B, n_cands]        — unnormalized scores
             log_probs      : [B, n_cands]        — log-softmax scores
             predicted_idx  : [B]                 — argmax prediction
             msg_embedding  : [B, d_backbone]     — for analysis
         """
-        msg_emb = self.encode_message(message_bytes, pad_mask)   # [B, d_bb]
+        msg_emb = self.encode_message(message_bytes, pad_mask, soft_tokens)  # [B, d_bb]
         cand_embs = self.embed_candidates(candidate_attrs)        # [B, N, d_bb]
 
         # Scaled dot product: [B, N]

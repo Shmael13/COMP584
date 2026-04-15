@@ -45,6 +45,18 @@ class ByteEmbedding(nn.Module):
         emb = emb + self.pos_enc[:, : x.size(1)]      # broadcast over batch
         return emb
 
+    def forward_soft(self, soft_tokens: torch.Tensor) -> torch.Tensor:
+        """Differentiable embedding for soft one-hot distributions.
+
+        Args:
+            soft_tokens: [B, L, vocab_size]
+        Returns:
+            embeddings : [B, L, d_model]
+        """
+        emb = soft_tokens @ self.token_emb.weight      # [B, L, d_model]
+        emb = emb + self.pos_enc[:, : soft_tokens.size(1)]
+        return emb
+
 
 class CharacterEncoder(nn.Module):
     """
@@ -89,3 +101,16 @@ class CharacterEncoder(nn.Module):
         x = self.transformer(x, src_key_padding_mask=key_padding_mask) # [B, L, d]
         w_output = x[:, 0, :]                                          # [W] token position
         return self.proj(w_output)                                     # [B, d_backbone]
+
+    def forward_soft(self, soft_tokens: torch.Tensor) -> torch.Tensor:
+        """Encode soft token distributions (straight-through training path).
+
+        Args:
+            soft_tokens: [B, seq_len, vocab_size] — first position is W_TOKEN one-hot
+        Returns:
+            word_embeddings: [B, d_backbone]
+        """
+        x = self.embedding.forward_soft(soft_tokens)  # [B, L, d_char]
+        x = self.transformer(x)                        # [B, L, d_char]
+        w_output = x[:, 0, :]                          # [W] token position
+        return self.proj(w_output)                     # [B, d_backbone]

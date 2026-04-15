@@ -39,6 +39,14 @@ def _prepend_w_token(byte_ids: torch.Tensor) -> torch.Tensor:
     return torch.cat([prefix, byte_ids], dim=1)
 
 
+def _prepend_w_token_soft(soft_tokens: torch.Tensor) -> torch.Tensor:
+    """Prepend a hard W_TOKEN one-hot to soft token sequence [B, L, V] → [B, L+1, V]."""
+    B, _, V = soft_tokens.shape
+    w_one_hot = torch.zeros(B, 1, V, device=soft_tokens.device, dtype=soft_tokens.dtype)
+    w_one_hot[:, 0, W_TOKEN] = 1.0
+    return torch.cat([w_one_hot, soft_tokens], dim=1)
+
+
 def _make_pad_mask(byte_ids: torch.Tensor, eos_byte: int = 0) -> torch.Tensor:
     """
     Create a padding mask: True for positions *after* the first EOS token.
@@ -75,13 +83,20 @@ class EmergentCommTrainer:
         self.cfg = cfg
         self.device = device
 
-        self.optimizer = torch.optim.AdamW(
-            list(sender.parameters()) + list(receiver.parameters()),
-            lr=cfg.training.learning_rate,
+        # Separate optimizers: receiver needs a higher LR so it can track the sender,
+        # which changes more slowly (0.5x) to keep messages stable.
+        self.sender_opt = torch.optim.AdamW(
+            sender.parameters(),
+            lr=cfg.training.learning_rate * 0.5,
+            weight_decay=cfg.training.weight_decay,
+        )
+        self.receiver_opt = torch.optim.AdamW(
+            receiver.parameters(),
+            lr=cfg.training.learning_rate * 2.0,
             weight_decay=cfg.training.weight_decay,
         )
 
-        # Initialise baseline at random-chance level so REINFORCE has a neutral start
+        # Baseline for REINFORCE fallback (not used in straight-through mode)
         self.baseline = 1.0 / (cfg.env.n_distractors + 1)
         self.history = TrainingHistory()
 
@@ -92,48 +107,55 @@ class EmergentCommTrainer:
         candidate_attrs = batch["candidate_attrs"] # [B, N, 3]
         target_idx = batch["target_idx"]           # [B]
 
-        # --- Sender: generate message bytes ---
+        use_st = self.cfg.agent.use_straight_through
+
+        # --- Sender: generate message ---
         sender_out = self.sender(target_attrs)
         msg_bytes = sender_out["message_bytes"]    # [B, gen_len]
-        sender_log_probs = sender_out["log_probs"] # [B, gen_len]
-
-        # Prepend W_TOKEN so receiver encoder sees standard format.
-        # Fixed-length messages have no padding.
-        msg_with_w = _prepend_w_token(msg_bytes)   # [B, 1+msg_len]
+        msg_with_w = _prepend_w_token(msg_bytes)   # [B, 1+gen_len]
 
         # --- Receiver: score candidates ---
-        receiver_out = self.receiver(msg_with_w, candidate_attrs, pad_mask=None)
-        recv_log_probs = receiver_out["log_probs"] # [B, N]
+        if use_st and "message_soft" in sender_out:
+            # Straight-through: pass differentiable soft tokens so gradients flow
+            # from receiver loss all the way back through the sender.
+            soft_with_w = _prepend_w_token_soft(sender_out["message_soft"])
+            receiver_out = self.receiver(msg_with_w, candidate_attrs, soft_tokens=soft_with_w)
+        else:
+            receiver_out = self.receiver(msg_with_w, candidate_attrs)
+
+        recv_log_probs = receiver_out["log_probs"]  # [B, N]
 
         # --- Losses ---
-        s_loss, r_loss, self.baseline = reinforce_loss(
-            recv_log_probs, target_idx, sender_log_probs, self.baseline
-        )
-
-        # Entropy regularisation: penalise low-entropy (repetitive) sender distributions.
-        # We use the logits to compute the true Shannon entropy of the policy.
-        # Higher entropy = more diverse messages = avoids mode collapse.
         e_loss = sender_entropy_loss(sender_out["logits"])
 
-        total_loss = s_loss + r_loss + self.cfg.training.entropy_coeff * e_loss
+        if use_st:
+            # End-to-end differentiable: receiver NLL gradient flows through soft tokens
+            # back to sender parameters. No REINFORCE needed.
+            r_loss = receiver_nll_loss(recv_log_probs, target_idx)
+            s_loss = torch.zeros(1, device=self.device)
+            total_loss = r_loss + self.cfg.training.entropy_coeff * e_loss
+        else:
+            s_loss, r_loss, self.baseline = reinforce_loss(
+                recv_log_probs, target_idx, sender_out["log_probs"], self.baseline
+            )
+            total_loss = s_loss + r_loss + self.cfg.training.entropy_coeff * e_loss
 
-        self.optimizer.zero_grad(set_to_none=True)
+        self.sender_opt.zero_grad(set_to_none=True)
+        self.receiver_opt.zero_grad(set_to_none=True)
         total_loss.backward()
         nn.utils.clip_grad_norm_(
             list(self.sender.parameters()) + list(self.receiver.parameters()),
             self.cfg.training.grad_clip,
         )
-        self.optimizer.step()
+        self.sender_opt.step()
+        self.receiver_opt.step()
 
         acc = communication_accuracy(recv_log_probs, target_idx)
-        # With fixed-length messages, report unique messages in batch as diversity proxy
-        mean_msg_len = msg_bytes.size(1)  # always = max_message_len
-
         return {
             "acc": acc,
             "sender_loss": s_loss.item(),
             "receiver_loss": r_loss.item(),
-            "mean_msg_len": mean_msg_len,
+            "mean_msg_len": msg_bytes.size(1),
         }
 
     @torch.no_grad()

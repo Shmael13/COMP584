@@ -98,6 +98,36 @@ def reinforce_loss(
     return sender_loss, receiver_loss, new_baseline
 
 
+def attribute_prediction_loss(
+    color_logits: torch.Tensor,
+    shape_logits: torch.Tensor,
+    size_logits: torch.Tensor,
+    target_attrs: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Auxiliary compositionality loss.
+
+    Forces the receiver's message embedding to predict each object attribute
+    (color, shape, size) independently. Because gradients flow back through
+    the soft tokens to the sender, this directly pressures the sender to encode
+    each attribute as a consistent, separable part of the message rather than
+    emitting one arbitrary holistic signal per object.
+
+    Args:
+        color_logits : [B, n_colors]
+        shape_logits : [B, n_shapes]
+        size_logits  : [B, n_sizes]
+        target_attrs : [B, 3]  — (color_idx, shape_idx, size_idx)
+    Returns:
+        mean cross-entropy over the three attributes
+    """
+    return (
+        F.cross_entropy(color_logits, target_attrs[:, 0]) +
+        F.cross_entropy(shape_logits, target_attrs[:, 1]) +
+        F.cross_entropy(size_logits, target_attrs[:, 2])
+    ) / 3.0
+
+
 def communication_accuracy(receiver_log_probs: torch.Tensor, target_idx: torch.Tensor) -> float:
     """Fraction of trials where receiver correctly identified the target."""
     predicted = receiver_log_probs.argmax(dim=-1)

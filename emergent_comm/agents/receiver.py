@@ -53,6 +53,24 @@ class Receiver(nn.Module):
         # Scale dot products (learnable temperature)
         self.log_scale = nn.Parameter(torch.zeros(1))
 
+        # Attribute prediction heads: force the message embedding to encode each
+        # attribute in a recoverable way, pressuring the sender toward compositionality.
+        self.color_pred = nn.Linear(bb_cfg.d_model, n_colors)
+        self.shape_pred = nn.Linear(bb_cfg.d_model, n_shapes)
+        self.size_pred  = nn.Linear(bb_cfg.d_model, n_sizes)
+
+    def attribute_logits(
+        self, msg_emb: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Predict per-attribute logits from a message embedding.
+
+        Args:
+            msg_emb: [B, d_backbone]
+        Returns:
+            (color_logits [B, n_colors], shape_logits [B, n_shapes], size_logits [B, n_sizes])
+        """
+        return self.color_pred(msg_emb), self.shape_pred(msg_emb), self.size_pred(msg_emb)
+
     def embed_candidates(self, candidate_attrs: torch.Tensor) -> torch.Tensor:
         """
         Args:

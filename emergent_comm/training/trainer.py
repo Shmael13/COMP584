@@ -29,6 +29,7 @@ from .objectives import (
     sender_entropy_loss,
     communication_accuracy,
     receiver_nll_loss,
+    attribute_prediction_loss,
 )
 
 
@@ -140,6 +141,15 @@ class EmergentCommTrainer:
             )
             total_loss = s_loss + r_loss + self.cfg.training.entropy_coeff * e_loss
 
+        # --- Attribute prediction auxiliary loss ---
+        # Forces the message embedding to encode color, shape, and size as
+        # separable components. Gradient flows back through soft tokens to the
+        # sender, pushing it toward compositional rather than holistic messages.
+        msg_emb = receiver_out["msg_embedding"]
+        color_l, shape_l, size_l = self.receiver.attribute_logits(msg_emb)
+        attr_loss = attribute_prediction_loss(color_l, shape_l, size_l, target_attrs)
+        total_loss = total_loss + self.cfg.training.attr_pred_coeff * attr_loss
+
         self.sender_opt.zero_grad(set_to_none=True)
         self.receiver_opt.zero_grad(set_to_none=True)
         total_loss.backward()
@@ -155,6 +165,7 @@ class EmergentCommTrainer:
             "acc": acc,
             "sender_loss": s_loss.item(),
             "receiver_loss": r_loss.item(),
+            "attr_loss": attr_loss.item(),
             "mean_msg_len": msg_bytes.size(1),
         }
 
@@ -207,7 +218,7 @@ class EmergentCommTrainer:
 
                 print(
                     f"step={step:>6}  train_acc={metrics['acc']:.3f}  val_acc={val_acc:.3f}  "
-                    f"s_loss={metrics['sender_loss']:.4f}  r_loss={metrics['receiver_loss']:.4f}  "
+                    f"r_loss={metrics['receiver_loss']:.4f}  attr_loss={metrics['attr_loss']:.4f}  "
                     f"({elapsed:.0f}s)"
                 )
 

@@ -9,7 +9,7 @@ class EnvConfig:
     n_shapes: int = 8
     n_sizes: int = 4
     # How many distractor objects the receiver chooses between
-    n_distractors: int = 3  # + 1 target = 4 total candidates (random baseline = 0.25)
+    n_distractors: int = 7  # + 1 target = 8 total candidates (random baseline = 0.125)
     # Random seed for reproducibility
     seed: int = 42
 
@@ -83,6 +83,8 @@ class TrainingConfig:
     eval_every: int = 500
     # Entropy regularization coefficient (encourages diverse messages)
     entropy_coeff: float = 0.005
+    # Attribute prediction auxiliary loss coefficient (pressures compositionality)
+    attr_pred_coeff: float = 0.3
     # REINFORCE baseline decay
     baseline_decay: float = 0.95
     checkpoint_dir: str = "checkpoints"

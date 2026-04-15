@@ -107,7 +107,7 @@ class Sender(nn.Module):
             result["logits"] = logits
         else:
             # Autoregressive inference path (fixed-length to prevent EOS collapse)
-            msg_bytes, log_probs = self.decoder.generate(
+            msg_bytes, log_probs, logits = self.decoder.generate(
                 pred_emb,
                 temperature=self.agent_cfg.temperature,
                 max_len=self.agent_cfg.max_message_len,
@@ -115,5 +115,6 @@ class Sender(nn.Module):
             )
             result["message_bytes"] = msg_bytes
             result["log_probs"] = log_probs
+            result["logits"] = logits
 
         return result

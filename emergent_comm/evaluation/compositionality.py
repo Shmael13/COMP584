@@ -92,6 +92,8 @@ def topographic_similarity(
         return 0.0  # degenerate case
 
     corr, _ = spearmanr(attr_dists, msg_dists)
+    if np.isnan(corr):
+        return 0.0
     return float(corr)
 
 

@@ -78,9 +78,16 @@ def collect_vocabulary(
     # Zipf fit: rank * frequency should be roughly constant
     ranks = list(range(1, min(vocab_size + 1, 101)))
     sorted_freqs = [f for _, f in freq.most_common(100)]
-    zipf_coeff = float(np.corrcoef(np.log(ranks[:len(sorted_freqs)]),
-                                    np.log(np.array(sorted_freqs) + 1))[0, 1]) if len(sorted_freqs) > 1 else 0.0
-
+    
+    zipf_coeff = 0.0
+    if len(sorted_freqs) > 1:
+        log_ranks = np.log(ranks[:len(sorted_freqs)])
+        log_freqs = np.log(np.array(sorted_freqs) + 1e-9) # Use small epsilon
+        if np.var(log_freqs) > 1e-12:
+            zipf_coeff = float(np.corrcoef(log_ranks, log_freqs)[0, 1])
+            if np.isnan(zipf_coeff):
+                zipf_coeff = 0.0
+    
     # Attribute alignment: for each top word, which attribute value is most associated?
     top_words = freq.most_common(20)
     word_attribute_alignment = {}

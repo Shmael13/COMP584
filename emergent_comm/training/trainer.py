@@ -111,11 +111,9 @@ class EmergentCommTrainer:
         )
 
         # Entropy regularisation: penalise low-entropy (repetitive) sender distributions.
-        # sender_log_probs are log P(byte_t | context); use them to compute mean entropy.
+        # We use the logits to compute the true Shannon entropy of the policy.
         # Higher entropy = more diverse messages = avoids mode collapse.
-        byte_probs = sender_log_probs.exp()                          # [B, msg_len]
-        entropy_bonus = -(byte_probs * sender_log_probs).mean()      # mean negative entropy
-        e_loss = -entropy_bonus                                       # minimise → maximise entropy
+        e_loss = sender_entropy_loss(sender_out["logits"])
 
         total_loss = s_loss + r_loss + self.cfg.training.entropy_coeff * e_loss
 

@@ -11,6 +11,7 @@ import argparse
 import os
 import sys
 import pickle
+import random
 
 import torch
 import numpy as np
@@ -37,8 +38,8 @@ from torch.utils.data import DataLoader
 # ---------------------------------------------------------------------------
 
 def build_dataloaders(cfg, batch_size):
-    train_ds = SignalingGameDataset(cfg.env)
-    val_ds   = SignalingGameDataset(EnvConfig(seed=cfg.env.seed + 99))
+    train_ds = SignalingGameDataset(cfg.env, split="train")
+    val_ds   = SignalingGameDataset(cfg.env, split="val")
     kw = dict(batch_size=batch_size, collate_fn=collate_trials, num_workers=0)
     return DataLoader(train_ds, **kw), DataLoader(val_ds, **kw)
 
@@ -63,22 +64,28 @@ def build_agents(cfg):
 
 
 def collect_all_messages(sender, cfg, device):
-    """Run sender on every object in the world; return objects + messages."""
+    """Run sender on every object in the world; return objects + messages + logits."""
     pool = all_objects(cfg.env.n_colors, cfg.env.n_shapes, cfg.env.n_sizes)
-    objects_tuples, messages_bytes = [], []
+    objects_tuples, messages_bytes, messages_logits = [], [], []
     sender.eval()
     with torch.no_grad():
         for obj in pool:
             attrs = torch.tensor([obj.to_vector()], dtype=torch.long, device=device)
             out = sender(attrs)
             msg = out["message_bytes"][0].cpu().tolist()
+            logits = out["logits"][0].cpu()
+            
             eos = cfg.agent.eos_byte
             if eos in msg:
-                msg = msg[: msg.index(eos)]
+                idx = msg.index(eos)
+                msg = msg[:idx]
+                logits = logits[:idx]
+                
             objects_tuples.append(obj.to_vector())
             messages_bytes.append(msg)
+            messages_logits.append(logits)
     sender.train()
-    return pool, objects_tuples, messages_bytes
+    return pool, objects_tuples, messages_bytes, messages_logits
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +211,13 @@ def main():
     else:
         cfg.training.n_steps = args.steps
 
+    # Set global seeds
+    torch.manual_seed(cfg.training.seed)
+    np.random.seed(cfg.training.seed)
+    random.seed(cfg.training.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(cfg.training.seed)
+
     device = torch.device("cuda" if torch.cuda.is_available() else
                           "mps"  if torch.backends.mps.is_available() else "cpu")
     print(f"Device        : {device}")
@@ -236,7 +250,7 @@ def main():
         receiver.load_state_dict(ckpt["receiver"])
         print(f"  Loaded best checkpoint (step={ckpt['step']}, val_acc={ckpt['val_acc']:.3f})")
 
-    pool, objects_tuples, messages_bytes = collect_all_messages(sender, cfg, device)
+    pool, objects_tuples, messages_bytes, messages_logits = collect_all_messages(sender, cfg, device)
     lengths = [len(m) for m in messages_bytes]
     unique  = len(set(tuple(m) for m in messages_bytes))
     print(f"  Total objects   : {len(pool)}")
@@ -257,7 +271,7 @@ def main():
         key = f"attr{attr_idx}_max_disentanglement"
         print(f"  Max positional disentanglement [{attr_name}]: {comp[key]:.4f}")
 
-    vocab = collect_vocabulary(objects_tuples, messages_bytes, seg_cfg=cfg.segmentation)
+    vocab = collect_vocabulary(objects_tuples, messages_bytes, seg_cfg=cfg.segmentation, logits_list=messages_logits)
     print_vocabulary_report(vocab)
     print_example_messages(pool, messages_bytes, n=min(20, len(pool)))
 

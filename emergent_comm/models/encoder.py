@@ -68,7 +68,11 @@ class CharacterEncoder(nn.Module):
             batch_first=True,
             norm_first=True,
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=cfg.n_layers)
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=cfg.n_layers,
+            enable_nested_tensor=False,
+        )
 
         # Project from character dim to backbone dim
         self.proj = nn.Linear(cfg.d_model, d_backbone)

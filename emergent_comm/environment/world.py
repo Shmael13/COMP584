@@ -25,10 +25,23 @@ class SignalingGameDataset(IterableDataset):
         target_idx     : LongTensor []            — index of target in candidates
     """
 
-    def __init__(self, cfg: EnvConfig):
+    def __init__(self, cfg: EnvConfig, split: str = "train", split_ratio: float = 0.8):
         self.cfg = cfg
-        self.object_pool = all_objects(cfg.n_colors, cfg.n_shapes, cfg.n_sizes)
-        self.rng = random.Random(cfg.seed)
+        all_objs = all_objects(cfg.n_colors, cfg.n_shapes, cfg.n_sizes)
+        
+        # Partition the object pool based on the seed to ensure consistent splits
+        rng = random.Random(cfg.seed)
+        rng.shuffle(all_objs)
+        
+        split_idx = int(len(all_objs) * split_ratio)
+        if split == "train":
+            self.object_pool = all_objs[:split_idx]
+        elif split == "val":
+            self.object_pool = all_objs[split_idx:]
+        else:
+            self.object_pool = all_objs
+            
+        self.rng = random.Random(cfg.seed + (1 if split == "val" else 0))
 
     def __iter__(self) -> Iterator[dict]:
         while True:

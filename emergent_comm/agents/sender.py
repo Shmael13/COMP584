@@ -84,12 +84,14 @@ class Sender(nn.Module):
         target_attrs: torch.Tensor,
         target_bytes: torch.Tensor | None = None,
         target_pad_mask: torch.Tensor | None = None,
+        temperature: float | None = None,
     ) -> dict:
         """
         Args:
             target_attrs    : [B, 3]         — object attributes
             target_bytes    : [B, msg_len]   — teacher-forced bytes (training only)
             target_pad_mask : [B, msg_len]   — True where padded (training only)
+            temperature     : Gumbel tau override (None = use agent_cfg value)
         Returns dict with:
             logits          : [B, msg_len, vocab_size]  (training)
             pred_emb        : [B, d_backbone]
@@ -107,9 +109,10 @@ class Sender(nn.Module):
             result["logits"] = logits
         else:
             # Autoregressive inference path (fixed-length to prevent EOS collapse)
+            tau = temperature if temperature is not None else self.agent_cfg.temperature
             msg_bytes, log_probs, logits, soft_tokens = self.decoder.generate(
                 pred_emb,
-                temperature=self.agent_cfg.temperature,
+                temperature=tau,
                 max_len=self.agent_cfg.max_message_len,
                 fixed_length=True,
                 use_straight_through=self.agent_cfg.use_straight_through,

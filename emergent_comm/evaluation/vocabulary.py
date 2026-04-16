@@ -126,7 +126,7 @@ def print_vocabulary_report(vocab_results: dict):
     print(f"Vocabulary size    : {vocab_results['vocab_size']}")
     print(f"Total tokens       : {vocab_results['total_tokens']}")
     print(f"Type-token ratio   : {vocab_results['type_token_ratio']:.4f}")
-    print(f"Zipf correlation   : {vocab_results['zipf_correlation']:.4f}  (higher = more Zipfian)")
+    print(f"Zipf correlation   : {vocab_results['zipf_correlation']:.4f}  (closer to -1.0 = more Zipfian)")
     print(f"\nTop 20 emergent words:")
     for word_key, count in vocab_results["top_words"]:
         word_str = bytes_to_str(list(word_key)) if isinstance(word_key, tuple) else word_key

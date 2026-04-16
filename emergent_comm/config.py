@@ -84,7 +84,10 @@ class TrainingConfig:
     # Entropy regularization coefficient (encourages diverse messages)
     entropy_coeff: float = 0.005
     # Attribute prediction auxiliary loss coefficient (pressures compositionality)
-    attr_pred_coeff: float = 0.3
+    attr_pred_coeff: float = 0.5
+    # Gumbel temperature annealing: start high (exploration) → end low (commitment)
+    gumbel_tau_start: float = 2.0
+    gumbel_tau_end: float = 0.5
     # REINFORCE baseline decay
     baseline_decay: float = 0.95
     checkpoint_dir: str = "checkpoints"

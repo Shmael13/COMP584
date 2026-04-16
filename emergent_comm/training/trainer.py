@@ -101,7 +101,20 @@ class EmergentCommTrainer:
         self.baseline = 1.0 / (cfg.env.n_distractors + 1)
         self.history = TrainingHistory()
 
-    def _step(self, batch: dict) -> dict:
+    def _compute_tau(self, step: int) -> float:
+        """Exponentially anneal Gumbel temperature from tau_start → tau_end over training.
+
+        High tau early  = soft, exploratory sampling → harder to lock into holistic solutions.
+        Low tau later   = near-deterministic sampling → messages crystallise into stable signals.
+        """
+        if not self.cfg.agent.use_straight_through:
+            return self.cfg.agent.temperature
+        cfg = self.cfg.training
+        progress = min(step / max(cfg.n_steps, 1), 1.0)
+        # Exponential schedule
+        return cfg.gumbel_tau_start * (cfg.gumbel_tau_end / cfg.gumbel_tau_start) ** progress
+
+    def _step(self, batch: dict, step: int) -> dict:
         """One training step. Returns dict of scalar metrics."""
         batch = {k: v.to(self.device) for k, v in batch.items()}
         target_attrs = batch["target_attrs"]       # [B, 3]
@@ -109,9 +122,10 @@ class EmergentCommTrainer:
         target_idx = batch["target_idx"]           # [B]
 
         use_st = self.cfg.agent.use_straight_through
+        tau = self._compute_tau(step)
 
         # --- Sender: generate message ---
-        sender_out = self.sender(target_attrs)
+        sender_out = self.sender(target_attrs, temperature=tau)
         msg_bytes = sender_out["message_bytes"]    # [B, gen_len]
         msg_with_w = _prepend_w_token(msg_bytes)   # [B, 1+gen_len]
 
@@ -166,6 +180,7 @@ class EmergentCommTrainer:
             "sender_loss": s_loss.item(),
             "receiver_loss": r_loss.item(),
             "attr_loss": attr_loss.item(),
+            "tau": tau,
             "mean_msg_len": msg_bytes.size(1),
         }
 
@@ -202,7 +217,7 @@ class EmergentCommTrainer:
             if step >= cfg.n_steps:
                 break
 
-            metrics = self._step(batch)
+            metrics = self._step(batch, step)
             step += 1
 
             if step % cfg.eval_every == 0:
@@ -219,7 +234,7 @@ class EmergentCommTrainer:
                 print(
                     f"step={step:>6}  train_acc={metrics['acc']:.3f}  val_acc={val_acc:.3f}  "
                     f"r_loss={metrics['receiver_loss']:.4f}  attr_loss={metrics['attr_loss']:.4f}  "
-                    f"({elapsed:.0f}s)"
+                    f"tau={metrics['tau']:.3f}  ({elapsed:.0f}s)"
                 )
 
                 if val_acc > best_val_acc:

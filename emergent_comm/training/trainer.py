@@ -30,6 +30,7 @@ from .objectives import (
     communication_accuracy,
     receiver_nll_loss,
     attribute_prediction_loss,
+    soft_topsim_loss,
 )
 
 
@@ -169,6 +170,17 @@ class EmergentCommTrainer:
         attr_loss = attribute_prediction_loss(color_l, shape_l, size_l, target_attrs)
         total_loss = total_loss + self.cfg.training.attr_pred_coeff * attr_loss
 
+        # --- Soft topsim loss ---
+        # Directly penalizes misalignment between pairwise object distances and
+        # pairwise message distances. This provides a gradient that makes similar
+        # objects produce similar byte sequences — the direct driver of topsim.
+        # Only available in straight-through mode (requires differentiable tokens).
+        if use_st and "message_soft" in sender_out:
+            ts_loss = soft_topsim_loss(sender_out["message_soft"], target_attrs)
+            total_loss = total_loss + self.cfg.training.topsim_coeff * ts_loss
+        else:
+            ts_loss = torch.zeros(1, device=self.device)
+
         self.sender_opt.zero_grad(set_to_none=True)
         self.receiver_opt.zero_grad(set_to_none=True)
         total_loss.backward()
@@ -185,6 +197,7 @@ class EmergentCommTrainer:
             "sender_loss": s_loss.item(),
             "receiver_loss": r_loss.item(),
             "attr_loss": attr_loss.item(),
+            "topsim_loss": ts_loss.item(),
             "tau": tau,
             "mean_msg_len": msg_bytes.size(1),
         }
@@ -239,7 +252,7 @@ class EmergentCommTrainer:
                 print(
                     f"step={step:>6}  train_acc={metrics['acc']:.3f}  val_acc={val_acc:.3f}  "
                     f"r_loss={metrics['receiver_loss']:.4f}  attr_loss={metrics['attr_loss']:.4f}  "
-                    f"tau={metrics['tau']:.3f}  ({elapsed:.0f}s)"
+                    f"ts_loss={metrics['topsim_loss']:.4f}  tau={metrics['tau']:.3f}  ({elapsed:.0f}s)"
                 )
 
                 if val_acc > best_val_acc:

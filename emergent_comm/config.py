@@ -84,7 +84,10 @@ class TrainingConfig:
     # Entropy regularization coefficient (encourages diverse messages)
     entropy_coeff: float = 0.005
     # Attribute prediction auxiliary loss coefficient (pressures compositionality)
-    attr_pred_coeff: float = 0.5
+    attr_pred_coeff: float = 1.5
+    # Soft topsim loss coefficient (directly pressures message distances to
+    # correlate with object distances — the main driver of topsim improvement)
+    topsim_coeff: float = 0.3
     # Gumbel temperature annealing: hold at tau_start for warmup fraction of
     # training, then exponentially anneal to tau_end.
     # tau_start=1.0 keeps early training stable; tau_end=0.5 commits messages

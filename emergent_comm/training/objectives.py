@@ -113,19 +113,62 @@ def attribute_prediction_loss(
     each attribute as a consistent, separable part of the message rather than
     emitting one arbitrary holistic signal per object.
 
+    Color is weighted 2× because it is empirically the weakest attribute
+    (disentanglement ~0.07 vs ~0.25 for shape/size) and has the most classes.
+
     Args:
         color_logits : [B, n_colors]
         shape_logits : [B, n_shapes]
         size_logits  : [B, n_sizes]
         target_attrs : [B, 3]  — (color_idx, shape_idx, size_idx)
     Returns:
-        mean cross-entropy over the three attributes
+        weighted mean cross-entropy over the three attributes
     """
-    return (
-        F.cross_entropy(color_logits, target_attrs[:, 0]) +
-        F.cross_entropy(shape_logits, target_attrs[:, 1]) +
-        F.cross_entropy(size_logits, target_attrs[:, 2])
-    ) / 3.0
+    color_loss = F.cross_entropy(color_logits, target_attrs[:, 0])
+    shape_loss = F.cross_entropy(shape_logits, target_attrs[:, 1])
+    size_loss  = F.cross_entropy(size_logits,  target_attrs[:, 2])
+    # Color gets 2× weight: 8 values but worst disentanglement
+    return (2.0 * color_loss + shape_loss + size_loss) / 4.0
+
+
+def soft_topsim_loss(
+    soft_tokens: torch.Tensor,
+    target_attrs: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Differentiable approximation of topographic similarity (topsim).
+
+    Topsim = Spearman correlation between pairwise object distances and
+    pairwise message distances. We approximate it by MSE-matching normalized
+    pairwise distances in a batch, providing a direct gradient for making
+    similar objects produce similar messages.
+
+    Args:
+        soft_tokens  : [B, L, V]  — Gumbel-softmax one-hots from sender
+        target_attrs : [B, 3]     — (color_idx, shape_idx, size_idx)
+    Returns:
+        scalar loss (lower = messages and objects more correlated)
+    """
+    B, L, V = soft_tokens.shape
+
+    # Pairwise L2 distances between flattened soft message vectors [B, L*V]
+    msg_flat = soft_tokens.view(B, -1)
+    msg_dist = torch.cdist(msg_flat, msg_flat, p=2)  # [B, B]
+
+    # Pairwise Hamming distances between attribute tuples [B, B]
+    obj_dist = (target_attrs.unsqueeze(0) != target_attrs.unsqueeze(1)).float().mean(dim=-1)
+
+    # Use upper triangle only (avoid diagonal and double-counting)
+    mask = torch.triu(torch.ones(B, B, device=soft_tokens.device, dtype=torch.bool), diagonal=1)
+    msg_d = msg_dist[mask]
+    obj_d = obj_dist[mask]
+
+    # Normalize both to zero mean, unit std before comparing
+    msg_d = (msg_d - msg_d.mean()) / (msg_d.std() + 1e-8)
+    obj_d = (obj_d - obj_d.mean()) / (obj_d.std() + 1e-8)
+
+    # MSE: pushes message distance structure to match object distance structure
+    return F.mse_loss(msg_d, obj_d)
 
 
 def communication_accuracy(receiver_log_probs: torch.Tensor, target_idx: torch.Tensor) -> float:

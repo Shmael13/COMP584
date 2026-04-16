@@ -102,16 +102,21 @@ class EmergentCommTrainer:
         self.history = TrainingHistory()
 
     def _compute_tau(self, step: int) -> float:
-        """Exponentially anneal Gumbel temperature from tau_start → tau_end over training.
+        """Gumbel temperature schedule with warmup then exponential decay.
 
-        High tau early  = soft, exploratory sampling → harder to lock into holistic solutions.
-        Low tau later   = near-deterministic sampling → messages crystallise into stable signals.
+        Phase 1 (warmup): hold at tau_start so the receiver builds stable
+          message-meaning associations before messages start shifting.
+        Phase 2 (anneal): exponentially decay tau_start → tau_end so messages
+          commit to consistent, low-entropy signals that the segmenter can parse
+          into reusable word units.
         """
         if not self.cfg.agent.use_straight_through:
             return self.cfg.agent.temperature
         cfg = self.cfg.training
-        progress = min(step / max(cfg.n_steps, 1), 1.0)
-        # Exponential schedule
+        warmup_steps = int(cfg.n_steps * cfg.gumbel_warmup_frac)
+        if step < warmup_steps:
+            return cfg.gumbel_tau_start
+        progress = (step - warmup_steps) / max(cfg.n_steps - warmup_steps, 1)
         return cfg.gumbel_tau_start * (cfg.gumbel_tau_end / cfg.gumbel_tau_start) ** progress
 
     def _step(self, batch: dict, step: int) -> dict:

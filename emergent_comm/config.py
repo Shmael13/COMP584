@@ -85,9 +85,13 @@ class TrainingConfig:
     entropy_coeff: float = 0.005
     # Attribute prediction auxiliary loss coefficient (pressures compositionality)
     attr_pred_coeff: float = 0.5
-    # Gumbel temperature annealing: start high (exploration) → end low (commitment)
-    gumbel_tau_start: float = 2.0
+    # Gumbel temperature annealing: hold at tau_start for warmup fraction of
+    # training, then exponentially anneal to tau_end.
+    # tau_start=1.0 keeps early training stable; tau_end=0.5 commits messages
+    # in the final stage so patterns crystallise consistently.
+    gumbel_tau_start: float = 1.0
     gumbel_tau_end: float = 0.5
+    gumbel_warmup_frac: float = 0.3
     # REINFORCE baseline decay
     baseline_decay: float = 0.95
     checkpoint_dir: str = "checkpoints"
